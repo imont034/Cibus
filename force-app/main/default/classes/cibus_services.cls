@@ -34,7 +34,7 @@ public class HSDSService {
 
     @HttpGet
     global static void getServices(){
-
+        //TODO: all of this
     }  
 
     @HttpPost
@@ -63,6 +63,8 @@ public class HSDSService {
         service.Licenses__c = s.licenses;
 
         insert service;
+        res.statusCode = 200;
+        res.responseBody = req.requestBody;
         System.debug(res.responseBody);
         
         //TODO: on success send 200 response
