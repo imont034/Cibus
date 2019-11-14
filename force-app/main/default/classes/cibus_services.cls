@@ -53,7 +53,7 @@ global with sharing class cibus_services {
      * @description: Handels GET requests on /services/
      */
     @HttpGet
-    global static void getServices(){
+    global static String getServices(){
         RestRequest req = RestContext.request;
         RestResponse res = RestContext.response;
         String reqUri = EncodingUtil.urlDecode(req.requestURI,'UTF-8');
@@ -65,7 +65,8 @@ global with sharing class cibus_services {
         Integer lim = 100;
         Integer pageNum = 0;
         Integer offset = 0;
-        Boolean sortBy, orderDesc = false;
+        Boolean sortBy = false;
+        Boolean orderDesc = false;
 
 
         if(reqUri.contains('?')){
@@ -82,14 +83,16 @@ global with sharing class cibus_services {
                 //sorting
                 } else if(field.equals('sort_by') && validParams.contains(params.get(field))){
                     sortBy = true;
-                    if(params.containsKey('order'))
-                        if(params.get('order').equals('desc'))
+                    if(params.containsKey('order')){
+                        if(params.get('order').equals('desc')){
                             orderDesc = true;
+                        }
+                    }
                 //filtering
                 //This assumes that the query param is formated like /services?query=color=red,number=2,vehicle=car
                 //All query fields are ANDed together
                 } else if(field.equals('query')){
-                    String[] queries = params.get(query).split(',');
+                    String[] queries = params.get('query').split(',');
                     Map<String, String> m = new Map<String, String>();
 
                     for(Integer i = 0; i < queries.size(); i++){
@@ -101,7 +104,7 @@ global with sharing class cibus_services {
                     for(Integer i = 0; i < m.size(); i++){
                         Set <String> keySet = m.keySet();
                         List<String> queryFields = new List<String>(keySet); //this is dumb
-                        if(validParams.contains(m.get(queryFields[i]))){
+                        if(validParams.contains(queryFields[i])){
                             query += ' ' + queryFields[i] + ' = \'' + String.escapeSingleQuotes(m.get(queryFields[i])) + '\''; 
                             if(i < m.size()-1){
                                 query += ' AND';
@@ -122,8 +125,9 @@ global with sharing class cibus_services {
         }
         //TODO: Watch out for little bobby tables
         List<cibus_service__c> services = Database.query(query);
-        res.responseBody = Blob.valueOf(serializeServices(services));
-        res.statusCode = 200;
+        //res.responseBody = Blob.valueOf(genJSON(services, true));
+        //res.statusCode = 200;
+        return(genJSON(services, true));
         //TODO: error handling
     }
     
@@ -131,13 +135,14 @@ global with sharing class cibus_services {
      * @description: Handels POST requests on /services/
      */
     @HttpPost
-    global static void createService(){
+    global static String createService(String jsonBody){
         RestRequest req = RestContext.request;
-        RestResponse res = RestContext.response;
-        System.debug(LoggingLevel.ERROR, req.requestBody.toString());
+        RestResponse res = new RestResponse();
+        System.debug(LoggingLevel.ERROR, jsonBody);
+
         //TODO: Authenticate user, return 403 if auth fails
         
-        HSDSService s = (HSDSService)JSON.deserialize(req.requestBody.toString(), HSDSService.class);
+        HSDSService s = (HSDSService)JSON.deserialize(jsonBody, HSDSService.class);
         cibus_service__c service = new cibus_service__c();
         
         //convert HSDSService (s) to cibus_service__c (service)
@@ -158,8 +163,9 @@ global with sharing class cibus_services {
         insert service;
         
         res.statusCode = 200;
-        res.responseBody = Blob.valueOf(serializeSingleService(service));
-        System.debug(res.responseBody);
+        return genJSON(service, true, false);
+        //RestContext.response = res;
+        //System.debug(res.responseBody);
         
         //TODO: authenticate user
         //TODO: error handling
@@ -168,61 +174,68 @@ global with sharing class cibus_services {
     }
 
     /**
-     * @description: Serializes a list of serivces to JSON.
-     * @param: A List<cibus_service__c> of services to serialize.  
-     * @return: A JSON String.
+     * @description     Serializes a list of serivces to JSON.
+     * @param  service  the services to serialize
+     * @param  pretty   use pretty formatting
+     * @return          a JSON String
      */
-    public static String serializeServices(List<cibus_service__c> services){
-        List<Map<String, Object>> result = new List<Map<String, Object>>();
-
-        for(cibus_service__c s : services){
-            Map<String, Object> m = new Map<String, Object>();
-            for (SObjectField field : fieldMapping.keySet()) {
+    public static String genJSON(cibus_service__c service, boolean pretty, boolean asCollection){
+        JSONGenerator gen = JSON.createGenerator(pretty);
+        if(asCollection)
+            gen.writeStartArray();
+        gen.writeStartObject();
+        for (SObjectField field : fieldMapping.keySet()) {
                 String fieldName = fieldMapping.get(field);
-                System.debug(fieldName + ': ' + s.get(field));
-                m.put(fieldName, s.get(field));
-                result.add(m);
-            }
+                System.debug(LoggingLevel.ERROR,fieldName + ': ' + service.get(field));
+                gen.writeStringField((String)fieldName,(String)service.get(field));
         }
-        System.debug(JSON.serialize(result)); //result should be a collection of services
-        return JSON.serialize(result);
+        gen.writeEndObject();
+        if(asCollection)
+            gen.writeEndArray();
+        gen.close();
+        return gen.getAsString();   
     }
 
     /**
-     * @description: Serializes a single to JSON.
-     * @param: A List<cibus_service__c> of services to serialize.  
-     * @return: A JSON String.
+     * @description     Serializes a list of serivces to JSON.
+     * @param  services a list of services to serialize
+     * @param  pretty   use pretty formatting
+     * @return          a JSON String
      */
-    public static String serializeSingleService(cibus_service__c service){
-        List<Map<String, Object>> result = new List<Map<String, Object>>();
-
-            Map<String, Object> m = new Map<String, Object>();
+    public static String genJSON(List<cibus_service__c> services, boolean pretty){
+        JSONGenerator gen = JSON.createGenerator(pretty);
+        gen.writeStartArray();
+        for(cibus_service__c s : services){
+            gen.writeStartObject();
             for (SObjectField field : fieldMapping.keySet()) {
-                String fieldName = fieldMapping.get(field);
-                System.debug(fieldName + ': ' + service.get(field));
-                m.put(fieldName, service.get(field));
-                result.add(m);
+                    String fieldName = fieldMapping.get(field);
+                    System.debug(fieldName + ': ' + s.get(field));
+                    gen.writeStringField(fieldName, (String)s.get(field));
             }
-
-        System.debug(JSON.serialize(result)); //result should be a singal services
-        return JSON.serialize(result);
+            gen.writeEndObject();
+        }
+        gen.writeEndArray();
+        gen.close();
+        return gen.getAsString();   
     }
 
     /**
-     * @description: Fetches query parameters from a uri.
-     * @param: String uri
-     * @return Returns a map of fields to query and their values.
+     * @description     Serializes a single serivces to JSON.
+     * @param  services a services to serialize
+     * @param  pretty   use pretty formatting
+     * @return          a JSON String
      */
     public static Map<String, String> getURLParams(String uri){
-        Map<String, String> params = new Map<String, String>();        
-        do{
-            String nextParam = uri.substring(uri.indexOf('?')+1, uri.indexOf('&'));
-            String[] keyValue = nextParam.split('=', 2);
+        Map<String, String> params = new Map<String, String>();
+        String[] keyValue = new String[2];
+
+        uri = uri.substring(uri.indexOf('?')+1);
+        String[] combinedParams = uri.split('&');
+        for(String s : combinedParams){
+            keyValue = s.split('=', 2);
             params.put(keyValue[0], keyValue[1]);
-            if(uri.indexof('&') != -1){
-                uri = uri.substring(uri.indexOf('&')+1);
-            }
-        }while(uri.indexOf('?') != -1);
+        }
+
         return params;
     }
 
