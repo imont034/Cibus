@@ -84,13 +84,13 @@ public with sharing class cibus_services_test {
         System.assertEquals(expectedJSON, res);
 
         request = new RestRequest();
-        request.requestURI = 'https://na112.salesforce.com/services/apexrest/services?query=name=New%20Service&sort_by=name&order=asc';
+        request.requestURI = 'https://na112.salesforce.com/services/apexrest/services?query=name=New%20Service&sort_by=name&order=asc&per_page=1';
         request.httpMethod = 'GET';
         RestContext.request = request;
         res = cibus_services.getServices();
         System.debug(res);
         System.assertEquals(expectedJSON, res);
-        //TODO: add more test cases
+        //TODO: add more test cases for multipe qury params, pagination, and sort order
     }
 
     @isTest

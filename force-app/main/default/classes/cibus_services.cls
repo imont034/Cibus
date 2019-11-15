@@ -6,6 +6,7 @@
 */
 @RestResource(urlMapping='/V00/services/')
 global with sharing class cibus_services {
+//Angelica told me to hold your hand so get ready for lots of comments. (please excuse any spelling mistakes!)
 
     /**
     * an apex type to describe an HSDS compliant service
@@ -31,7 +32,7 @@ global with sharing class cibus_services {
         public String licenses; 
     }
 
-    //Maps cibus_service__c fields to HSDS
+    //Maps cibus_service__c fields to HSDSService fields
     public static final Map<SObjectField, String> fieldMapping = new Map<SObjectField, String>{
         cibus_service__c.id => 'id',
         cibus_service__c.name => 'name',
@@ -58,6 +59,7 @@ global with sharing class cibus_services {
         RestResponse res = RestContext.response;
         String reqUri = EncodingUtil.urlDecode(req.requestURI,'UTF-8');
 
+        //These are the fields that I am allowing people to sort and filter by.
         String[] validParams = new String[]{'id', 'location_id', 'program_id', 'organization_id', 'name', 'status', 'alternate_name'};
 
         String query = 'SELECT id, name, alternate_name__c, description__c, url__c,  email__c, status__c, Interpretation_Services__c, Application_Process__c, Wait_Time__c, Fees__c, Accreditation__c, Licenses__c FROM cibus_service__c';
@@ -68,7 +70,7 @@ global with sharing class cibus_services {
         Boolean sortBy = false;
         Boolean orderDesc = false;
 
-
+        //URL parameter handling
         if(reqUri.contains('?')){
             Map<String, String> params = getURLParams(reqUri);
             for(String field : params.keySet()){
@@ -79,7 +81,7 @@ global with sharing class cibus_services {
 
                 } else if(field.equals('per_page')){
                     if(Integer.valueOf(params.get(field)) < 100) //max reccords per page is 100
-                        lim = Integer.valueOf(params.get(field));
+                        lim = Integer.valueOf(params.get(field)); // should we send an error if the value is > 100?
                 //sorting
                 } else if(field.equals('sort_by') && validParams.contains(params.get(field))){
                     sortBy = true;
@@ -90,6 +92,7 @@ global with sharing class cibus_services {
                     }
                 //filtering
                 //This assumes that the query param is formated like /services?query=color=red,number=2,vehicle=car
+                    //Should we add support for other collection formats for query?
                 //All query fields are ANDed together
                 } else if(field.equals('query')){
                     String[] queries = params.get('query').split(',');
@@ -102,11 +105,10 @@ global with sharing class cibus_services {
                     
                     query += ' WHERE';
                     for(Integer i = 0; i < m.size(); i++){
-                        Set <String> keySet = m.keySet();
-                        List<String> queryFields = new List<String>(keySet); //this is dumb
+                        List<String> queryFields = new List<String>(m.keySet());
                         if(validParams.contains(queryFields[i])){
                             query += ' ' + queryFields[i] + ' = \'' + String.escapeSingleQuotes(m.get(queryFields[i])) + '\''; 
-                            if(i < m.size()-1){
+                            if(i < m.size()-1){                             //^ My attempt at preventing SOQL injection
                                 query += ' AND';
                             }
                         }
@@ -125,8 +127,7 @@ global with sharing class cibus_services {
         }
         //TODO: Watch out for little bobby tables
         List<cibus_service__c> services = Database.query(query);
-        //res.responseBody = Blob.valueOf(genJSON(services, true));
-        //res.statusCode = 200;
+        res.statusCode = 200;
         return(genJSON(services, true));
         //TODO: error handling
     }
@@ -147,23 +148,30 @@ global with sharing class cibus_services {
         
         //convert HSDSService (s) to cibus_service__c (service)
         //TODO: org_id, program_id, location_id
-        service.name = s.name;
-        service.alternate_name__c = s.alternate_name;
-        service.description__c =  s.description;
-        service.url__c = s.url;
-        service.email__c = s.email;
-        service.status__c = s.status;
-        service.Interpretation_Services__c	= s.interpretation_services;
-        service.Application_Process__c = s.application_process;
-        service.Wait_Time__c = s.wait_time;
-        service.Fees__c = s.fees;
-        service.Accreditation__c = s.accreditations;
-        service.Licenses__c = s.licenses;
+        try{
+            service.name = s.name;
+            service.alternate_name__c = s.alternate_name;
+            service.description__c =  s.description;
+            service.url__c = s.url;
+            service.email__c = s.email;
+            service.status__c = s.status;
+            service.Interpretation_Services__c	= s.interpretation_services;
+            service.Application_Process__c = s.application_process;
+            service.Wait_Time__c = s.wait_time;
+            service.Fees__c = s.fees;
+            service.Accreditation__c = s.accreditations;
+            service.Licenses__c = s.licenses;
+            
+            insert service;
+            
+            res.statusCode = 200;
+            return genJSON(service, true, false);
         
-        insert service;
+        } catch(DmlException e){
+            res.statusCode = 500;
+            return '[\n\t{\n\t\t"code": 500,\n\t\t"message": "Failed to insert service. Internal error message: ' + e.getMessage() +'"\n\t}\n]';
+        }
         
-        res.statusCode = 200;
-        return genJSON(service, true, false);
         //RestContext.response = res;
         //System.debug(res.responseBody);
         
@@ -186,8 +194,8 @@ global with sharing class cibus_services {
         gen.writeStartObject();
         for (SObjectField field : fieldMapping.keySet()) {
                 String fieldName = fieldMapping.get(field);
-                System.debug(LoggingLevel.ERROR,fieldName + ': ' + service.get(field));
-                gen.writeStringField((String)fieldName,(String)service.get(field));
+                //System.debug(fieldName + ': ' + service.get(field));
+                gen.writeStringField((String)fieldName,(String)service.get(field));//what happens when a field is empty? returns null?
         }
         gen.writeEndObject();
         if(asCollection)
@@ -220,10 +228,9 @@ global with sharing class cibus_services {
     }
 
     /**
-     * @description     Serializes a single serivces to JSON.
-     * @param  services a services to serialize
-     * @param  pretty   use pretty formatting
-     * @return          a JSON String
+     * getURLParams Strips parameters from a given URL
+     * @param  uri  The uri to get parameters from
+     * @return      returns a map of parameter fields and their values
      */
     public static Map<String, String> getURLParams(String uri){
         Map<String, String> params = new Map<String, String>();
